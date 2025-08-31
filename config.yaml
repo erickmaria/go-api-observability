@@ -1,2 +1,12 @@
 server:
   port: 8080
+
+observability:
+  service-name: random-number-api
+  otel:
+    endpoint: otel-collector:4317
+    insecure: true
+  logs:
+    collector: true
+  trace:
+    collector: true # if false the trace goes to stdout

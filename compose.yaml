@@ -1,22 +1,63 @@
+
 networks:
   monitoring:
     name: monitoring
-  workloads:
-    name: workloads
+    external: true
+  services:
+    name: services
+    external: true
+  proxy:
+    name: proxy
+    external: true
 
 services:
-  api-server:
-    container_name: api-server
-    build:
-      context: backend
-      dockerfile: ../backend.Dockerfile
+  otel-autoinstrumentation-go:
+    container_name: otel-autoinstrumentation-go
+    image: otel/autoinstrumentation-go:v0.21.0
+    privileged: true
+    pid: "host"
     environment:
-      - ENDPOINT=otel-collector:4317
-    restart: always
+      OTEL_GO_AUTO_GLOBAL: true
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: true
+      OTEL_GO_AUTO_TARGET_EXE: /app/random-number-api
+      OTEL_SERVICE_NAME: random-number-api
+      OTEL_PROPAGATORS: "tracecontext,baggage"
+      # OTEL_LOG_LEVEL: debug
+      OTEL_GO_AUTO_INCLUDE_DB_STATEMENT: true
+      OTEL_GO_AUTO_PARSE_DB_STATEMENT: true
+      CGO_ENABLED: 1
+    command: ["/otel-go-instrumentation", "-global-impl"]
     networks:
       - monitoring
-      - workloads
-    # logging:
-    #   driver: loki
-    #   options:
-    #     loki-url: 'http://loki:3100/api/prom/push'
+      - services
+    depends_on:
+      - random-number-api
+    volumes:
+      - /proc:/host/proc
+  random-number-api:
+    container_name: random-number-api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.random-number-api.rule=Host(`random-number-api.localhost`)"
+      - "traefik.http.routers.random-number-api.entrypoints=websecure"
+      - "traefik.http.services.random-number-api.loadbalancer.server.port=8080"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODE: instrumented
+        # MODE: autoinstrumentation
+    environment:
+      CGO_ENABLED: 1
+    networks:
+      - proxy
+      - monitoring
+      - services
+    pid: "host"
+    # ports:
+    #   - 8888:8080
+    restart: always
+    volumes:
+      - /proc:/host/proc
